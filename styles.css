@@ -317,6 +317,99 @@ body {
     background: rgba(255, 255, 255, 0.3);
 }
 
+.btn-sync {
+    padding: 6px 14px;
+    background: rgba(52, 168, 83, 0.8);
+    border: none;
+    border-radius: 20px;
+    color: var(--white);
+    font-size: 12px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-sync:hover {
+    background: rgba(52, 168, 83, 1);
+}
+
+.btn-refresh {
+    padding: 6px 14px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 20px;
+    color: var(--white);
+    font-size: 12px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-refresh:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* 同步说明 */
+.sync-instructions {
+    background: var(--primary-light);
+    padding: 16px;
+    border-radius: var(--border-radius);
+    margin-bottom: 16px;
+}
+
+.sync-instructions h4 {
+    margin-bottom: 12px;
+    color: var(--primary-color);
+}
+
+.sync-instructions ol {
+    margin: 0;
+    padding-left: 20px;
+}
+
+.sync-instructions li {
+    margin-bottom: 8px;
+    line-height: 1.6;
+}
+
+.sync-instructions a {
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+/* 添加照片区域 */
+.add-photo-section {
+    margin-top: 20px;
+    padding: 16px;
+    background: var(--gray-50);
+    border-radius: var(--border-radius);
+    border: 1px dashed var(--gray-300);
+}
+
+.add-photo-section h4 {
+    margin-bottom: 8px;
+    color: var(--gray-700);
+}
+
+.photo-hint {
+    font-size: 13px;
+    color: var(--gray-500);
+    margin-bottom: 12px;
+}
+
+.photo-hint a {
+    color: var(--primary-color);
+    font-weight: 500;
+}
+
+#syncDataText {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    line-height: 1.4;
+    background: var(--gray-800);
+    color: #4ec9b0;
+    border: none;
+    border-radius: var(--border-radius);
+}
+
 /* 管理员槽位 */
 .admin-slots p {
     margin-bottom: 16px;
