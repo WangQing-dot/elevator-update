@@ -1,6 +1,6 @@
 /**
  * 中达国通电梯更新 - 主应用程序
- * 支持管理员权限控制、地图定位、在线数据共享
+ * 支持 GitHub 云端数据同步、管理员权限控制
  */
 
 // ========================================
@@ -8,11 +8,12 @@
 // ========================================
 
 const APP_CONFIG = {
-    dbName: 'ElevatorUpdateDB',
-    dbVersion: 2,
-    projectStore: 'projects',
-    photoStore: 'photos',
-    // 管理员密码配置（实际应用中应该加密存储）
+    // GitHub 仓库配置 - 用于读取云端数据
+    githubUser: 'WangQing-dot',
+    githubRepo: 'elevator-update',
+    dataFile: 'projects.json',
+    
+    // 管理员密码配置
     adminPasswords: {
         admin1: '123456',  // 管理员1密码
         admin2: '123456',  // 管理员2密码
@@ -65,178 +66,114 @@ const WORKFLOW_STEPS = [
 ];
 
 // ========================================
-// 数据库管理类
+// 数据管理类
 // ========================================
 
-class DatabaseManager {
+class DataManager {
     constructor() {
-        this.localDb = null;
+        this.projects = [];
+        this.lastSync = null;
     }
 
-    async init() {
-        await this.initLocalDb();
-        return true;
+    // 从 GitHub 加载云端数据
+    async loadFromCloud() {
+        try {
+            const url = `https://raw.githubusercontent.com/${APP_CONFIG.githubUser}/${APP_CONFIG.githubRepo}/main/${APP_CONFIG.dataFile}?t=${Date.now()}`;
+            const response = await fetch(url);
+            
+            if (response.ok) {
+                const data = await response.json();
+                this.projects = data.projects || [];
+                this.lastSync = new Date().toISOString();
+                console.log('从云端加载数据成功，项目数:', this.projects.length);
+                return true;
+            } else if (response.status === 404) {
+                // 文件不存在，使用空数据
+                console.log('云端数据文件不存在，使用空数据');
+                this.projects = [];
+                return true;
+            } else {
+                throw new Error('加载失败: ' + response.status);
+            }
+        } catch (error) {
+            console.error('从云端加载数据失败:', error);
+            // 尝试从本地存储加载
+            return this.loadFromLocal();
+        }
     }
 
-    async initLocalDb() {
-        return new Promise((resolve, reject) => {
-            const request = indexedDB.open(APP_CONFIG.dbName, APP_CONFIG.dbVersion);
+    // 从本地存储加载
+    loadFromLocal() {
+        try {
+            const saved = localStorage.getItem('elevator_projects');
+            if (saved) {
+                const data = JSON.parse(saved);
+                this.projects = data.projects || [];
+                console.log('从本地加载数据，项目数:', this.projects.length);
+            }
+            return true;
+        } catch (error) {
+            console.error('从本地加载数据失败:', error);
+            this.projects = [];
+            return false;
+        }
+    }
 
-            request.onerror = () => reject(new Error('无法打开本地数据库'));
-
-            request.onsuccess = (event) => {
-                this.localDb = event.target.result;
-                resolve(this.localDb);
+    // 保存到本地存储
+    saveToLocal() {
+        try {
+            const data = {
+                projects: this.projects,
+                lastModified: new Date().toISOString()
             };
+            localStorage.setItem('elevator_projects', JSON.stringify(data));
+            return true;
+        } catch (error) {
+            console.error('保存到本地失败:', error);
+            return false;
+        }
+    }
 
-            request.onupgradeneeded = (event) => {
-                const db = event.target.result;
-
-                if (!db.objectStoreNames.contains(APP_CONFIG.projectStore)) {
-                    const projectStore = db.createObjectStore(APP_CONFIG.projectStore, { keyPath: 'id' });
-                    projectStore.createIndex('createdAt', 'createdAt', { unique: false });
-                }
-
-                if (!db.objectStoreNames.contains(APP_CONFIG.photoStore)) {
-                    const photoStore = db.createObjectStore(APP_CONFIG.photoStore, { keyPath: 'id' });
-                    photoStore.createIndex('projectId', 'projectId', { unique: false });
-                    photoStore.createIndex('stepId', 'stepId', { unique: false });
-                }
-            };
-        });
+    // 生成云端同步数据
+    generateSyncData() {
+        return JSON.stringify({
+            projects: this.projects,
+            lastModified: new Date().toISOString(),
+            version: '1.0'
+        }, null, 2);
     }
 
     // 获取所有项目
-    async getAllProjects() {
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.projectStore], 'readonly');
-            const store = transaction.objectStore(APP_CONFIG.projectStore);
-            const request = store.getAll();
-
-            request.onsuccess = () => {
-                const projects = request.result.sort((a, b) => 
-                    new Date(b.createdAt) - new Date(a.createdAt)
-                );
-                resolve(projects);
-            };
-            request.onerror = () => reject(request.error);
-        });
+    getAllProjects() {
+        return this.projects.sort((a, b) => 
+            new Date(b.createdAt) - new Date(a.createdAt)
+        );
     }
 
     // 获取单个项目
-    async getProject(id) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.projectStore], 'readonly');
-            const store = transaction.objectStore(APP_CONFIG.projectStore);
-            const request = store.get(id);
-
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
-        });
+    getProject(id) {
+        return this.projects.find(p => p.id === id);
     }
 
     // 保存项目
-    async saveProject(project) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.projectStore], 'readwrite');
-            const store = transaction.objectStore(APP_CONFIG.projectStore);
-            const request = store.put(project);
-
-            request.onsuccess = () => resolve(project);
-            request.onerror = () => reject(request.error);
-        });
+    saveProject(project) {
+        const index = this.projects.findIndex(p => p.id === project.id);
+        if (index >= 0) {
+            this.projects[index] = project;
+        } else {
+            this.projects.push(project);
+        }
+        this.saveToLocal();
+        return project;
     }
 
     // 删除项目
-    async deleteProject(id) {
-        // 先删除项目的所有照片
-        const photos = await this.getPhotosByProject(id);
-        for (const photo of photos) {
-            await this.deletePhoto(photo.id);
-        }
-
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.projectStore], 'readwrite');
-            const store = transaction.objectStore(APP_CONFIG.projectStore);
-            const request = store.delete(id);
-
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-        });
+    deleteProject(id) {
+        this.projects = this.projects.filter(p => p.id !== id);
+        this.saveToLocal();
     }
 
-    // 上传照片（保存到本地）
-    async uploadPhoto(file, projectId, stepId, onProgress) {
-        const photoId = this.generateId();
-        
-        return new Promise((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = async () => {
-                const photo = {
-                    id: photoId,
-                    projectId,
-                    stepId,
-                    data: reader.result,
-                    fileName: file.name,
-                    uploadTime: new Date().toISOString(), // 上传时间
-                    createdAt: new Date().toISOString()
-                };
-
-                try {
-                    await this.savePhoto(photo);
-                    if (onProgress) onProgress(100);
-                    resolve(photo);
-                } catch (error) {
-                    reject(error);
-                }
-            };
-            reader.onerror = reject;
-            reader.readAsDataURL(file);
-        });
-    }
-
-    async savePhoto(photo) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.photoStore], 'readwrite');
-            const store = transaction.objectStore(APP_CONFIG.photoStore);
-            const request = store.put(photo);
-
-            request.onsuccess = () => resolve(photo);
-            request.onerror = () => reject(request.error);
-        });
-    }
-
-    // 获取项目的所有照片
-    async getPhotosByProject(projectId) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.photoStore], 'readonly');
-            const store = transaction.objectStore(APP_CONFIG.photoStore);
-            const index = store.index('projectId');
-            const request = index.getAll(projectId);
-
-            request.onsuccess = () => resolve(request.result || []);
-            request.onerror = () => reject(request.error);
-        });
-    }
-
-    // 获取步骤的所有照片
-    async getPhotosByStep(projectId, stepId) {
-        const allPhotos = await this.getPhotosByProject(projectId);
-        return allPhotos.filter(p => p.stepId === stepId);
-    }
-
-    // 删除照片
-    async deletePhoto(id) {
-        return new Promise((resolve, reject) => {
-            const transaction = this.localDb.transaction([APP_CONFIG.photoStore], 'readwrite');
-            const store = transaction.objectStore(APP_CONFIG.photoStore);
-            const request = store.delete(id);
-
-            request.onsuccess = () => resolve();
-            request.onerror = () => reject(request.error);
-        });
-    }
-
+    // 生成 ID
     generateId() {
         return Date.now().toString(36) + Math.random().toString(36).substr(2);
     }
@@ -248,7 +185,7 @@ class DatabaseManager {
 
 class ElevatorUpdateApp {
     constructor() {
-        this.db = new DatabaseManager();
+        this.db = new DataManager();
         this.currentProject = null;
         this.currentStep = null;
         this.currentPhotos = [];
@@ -257,19 +194,20 @@ class ElevatorUpdateApp {
         this.allProjects = [];
         this.isAdmin = false;
         this.currentAdmin = null;
-        this.map = null;
     }
 
     // 初始化应用
     async init() {
         this.showLoading();
         try {
-            await this.db.init();
+            // 先尝试从云端加载
+            await this.db.loadFromCloud();
+            
             this.checkAdminSession();
             this.updateAdminUI();
             this.bindEvents();
             this.updateDateDisplay();
-            await this.loadProjects();
+            this.loadProjects();
             console.log('中达国通电梯更新系统已启动');
         } catch (error) {
             console.error('初始化失败:', error);
@@ -333,6 +271,15 @@ class ElevatorUpdateApp {
         document.getElementById('cancelAdminModal').addEventListener('click', () => this.closeAdminModal());
         document.getElementById('confirmAdminLogin').addEventListener('click', () => this.adminLogin());
 
+        // 同步云端
+        document.getElementById('btnSyncCloud').addEventListener('click', () => this.openSyncModal());
+        document.getElementById('closeSyncModal').addEventListener('click', () => this.closeSyncModal());
+        document.getElementById('cancelSyncModal').addEventListener('click', () => this.closeSyncModal());
+        document.getElementById('copySyncData').addEventListener('click', () => this.copySyncData());
+
+        // 刷新数据
+        document.getElementById('btnRefreshData').addEventListener('click', () => this.refreshData());
+
         // 新建项目按钮
         document.getElementById('btnAddProject').addEventListener('click', () => this.openProjectModal());
         document.getElementById('btnCreateFirst').addEventListener('click', () => this.openProjectModal());
@@ -353,29 +300,7 @@ class ElevatorUpdateApp {
         // 照片模态框
         document.getElementById('closePhotoModal').addEventListener('click', () => this.closePhotoModal());
         document.getElementById('cancelPhotoModal').addEventListener('click', () => this.closePhotoModal());
-        document.getElementById('btnUploadPhoto').addEventListener('click', () => this.triggerPhotoUpload());
-
-        // 照片上传
-        const uploadArea = document.getElementById('uploadArea');
-        const photoInput = document.getElementById('photoInput');
-
-        uploadArea.addEventListener('click', () => photoInput.click());
-        uploadArea.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            uploadArea.classList.add('dragover');
-        });
-        uploadArea.addEventListener('dragleave', () => {
-            uploadArea.classList.remove('dragover');
-        });
-        uploadArea.addEventListener('drop', (e) => {
-            e.preventDefault();
-            uploadArea.classList.remove('dragover');
-            this.handlePhotoFiles(e.dataTransfer.files);
-        });
-        photoInput.addEventListener('change', (e) => {
-            this.handlePhotoFiles(e.target.files);
-            e.target.value = '';
-        });
+        document.getElementById('btnAddPhotoUrl').addEventListener('click', () => this.addPhotoFromUrl());
 
         // 预览模态框
         document.getElementById('closePreviewModal').addEventListener('click', () => this.closePreviewModal());
@@ -437,6 +362,10 @@ class ElevatorUpdateApp {
             this.updateAdminUI();
             this.closeAdminModal();
             this.showToast(`${this.currentAdmin} 登录成功`, 'success');
+            // 重新渲染当前页面
+            if (this.currentProject) {
+                this.renderProjectDetail();
+            }
         } else {
             this.showToast('密码错误', 'error');
         }
@@ -448,6 +377,51 @@ class ElevatorUpdateApp {
         localStorage.removeItem('currentAdmin');
         this.updateAdminUI();
         this.showToast('已退出登录', 'success');
+        // 重新渲染当前页面
+        if (this.currentProject) {
+            this.renderProjectDetail();
+        }
+    }
+
+    // ========================================
+    // 云端同步功能
+    // ========================================
+
+    openSyncModal() {
+        const syncData = this.db.generateSyncData();
+        document.getElementById('syncDataText').value = syncData;
+        document.getElementById('syncModal').classList.add('active');
+    }
+
+    closeSyncModal() {
+        document.getElementById('syncModal').classList.remove('active');
+    }
+
+    copySyncData() {
+        const textarea = document.getElementById('syncDataText');
+        textarea.select();
+        document.execCommand('copy');
+        this.showToast('数据已复制到剪贴板！请去 GitHub 更新 projects.json 文件', 'success');
+    }
+
+    async refreshData() {
+        this.showLoading();
+        try {
+            await this.db.loadFromCloud();
+            this.loadProjects();
+            if (this.currentProject) {
+                const updated = this.db.getProject(this.currentProject.id);
+                if (updated) {
+                    this.currentProject = updated;
+                    this.renderProjectDetail();
+                }
+            }
+            this.showToast('数据已刷新', 'success');
+        } catch (error) {
+            this.showToast('刷新失败', 'error');
+        } finally {
+            this.hideLoading();
+        }
     }
 
     // 更新日期显示
@@ -474,14 +448,12 @@ class ElevatorUpdateApp {
         const mapContainer = document.getElementById('mapContainer');
         mapContainer.style.display = 'block';
         
-        // 如果有坐标，显示地图
         if (this.currentProject && this.currentProject.coords) {
             const coords = this.currentProject.coords.split(',');
             if (coords.length === 2) {
                 const lng = parseFloat(coords[0]);
                 const lat = parseFloat(coords[1]);
                 
-                // 使用简单的静态地图图片
                 const mapView = document.getElementById('mapView');
                 mapView.innerHTML = `
                     <div style="width:100%; height:100%; display:flex; align-items:center; justify-content:center; background:#e8f0fe; border-radius:8px;">
@@ -520,14 +492,9 @@ class ElevatorUpdateApp {
     // 项目管理
     // ========================================
 
-    async loadProjects() {
-        try {
-            this.allProjects = await this.db.getAllProjects();
-            this.renderProjectList(this.allProjects);
-        } catch (error) {
-            console.error('加载项目失败:', error);
-            this.showToast('加载项目失败', 'error');
-        }
+    loadProjects() {
+        this.allProjects = this.db.getAllProjects();
+        this.renderProjectList(this.allProjects);
     }
 
     filterProjects(keyword) {
@@ -586,32 +553,27 @@ class ElevatorUpdateApp {
         return Math.round((completed / WORKFLOW_STEPS.length) * 100);
     }
 
-    async selectProject(id) {
-        try {
-            const project = await this.db.getProject(id);
-            if (!project) {
-                this.showToast('项目不存在', 'error');
-                return;
-            }
-
-            this.currentProject = project;
-            
-            document.querySelectorAll('.project-item').forEach(item => {
-                item.classList.toggle('active', item.dataset.id === id);
-            });
-
-            document.getElementById('welcomePage').style.display = 'none';
-            document.getElementById('projectDetail').style.display = 'block';
-            this.hideMap();
-            
-            await this.renderProjectDetail();
-        } catch (error) {
-            console.error('加载项目详情失败:', error);
-            this.showToast('加载项目详情失败', 'error');
+    selectProject(id) {
+        const project = this.db.getProject(id);
+        if (!project) {
+            this.showToast('项目不存在', 'error');
+            return;
         }
+
+        this.currentProject = project;
+        
+        document.querySelectorAll('.project-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.id === id);
+        });
+
+        document.getElementById('welcomePage').style.display = 'none';
+        document.getElementById('projectDetail').style.display = 'block';
+        this.hideMap();
+        
+        this.renderProjectDetail();
     }
 
-    async renderProjectDetail() {
+    renderProjectDetail() {
         const project = this.currentProject;
         const progress = this.calculateProgress(project);
         const isCompleted = progress === 100;
@@ -650,14 +612,11 @@ class ElevatorUpdateApp {
             badge.className = 'project-badge';
         }
 
-        // 获取项目所有照片
-        const allPhotos = await this.db.getPhotosByProject(project.id);
-
         // 渲染步骤
         const container = document.getElementById('stepsContainer');
         container.innerHTML = WORKFLOW_STEPS.map((step, index) => {
-            const stepData = project.steps?.find(s => s.id === step.id) || { id: step.id, status: 'pending' };
-            const photos = allPhotos.filter(p => p.stepId === step.id);
+            const stepData = project.steps?.find(s => s.id === step.id) || { id: step.id, status: 'pending', photos: [] };
+            const photos = stepData.photos || [];
             const isStepCompleted = stepData.status === 'completed';
             const statusClass = isStepCompleted ? 'completed' : 
                                stepData.status === 'in-progress' ? 'in-progress' : '';
@@ -691,9 +650,10 @@ class ElevatorUpdateApp {
                         <div class="step-photos">
                             ${photos.slice(0, 5).map(photo => `
                                 <div class="photo-thumb-container">
-                                    <img src="${photo.url || photo.data}" class="photo-thumb" data-photo-id="${photo.id}" 
-                                         onclick="app.openPreviewFromStep('${photo.id}', ${step.id})">
-                                    <span class="photo-time">${this.formatDateTime(photo.uploadTime || photo.createdAt)}</span>
+                                    <img src="${photo.url}" class="photo-thumb" 
+                                         onclick="app.openPreviewFromStep('${photo.id}', ${step.id})"
+                                         onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2260%22 height=%2260%22><rect fill=%22%23ddd%22 width=%2260%22 height=%2260%22/><text x=%2230%22 y=%2235%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2212%22>图片</text></svg>'">
+                                    <span class="photo-time">${this.formatDateTime(photo.uploadTime)}</span>
                                 </div>
                             `).join('')}
                             ${photos.length > 5 ? `<span style="color: var(--gray-500); align-self: center; font-size: 13px;">+${photos.length - 5} 更多</span>` : ''}
@@ -718,33 +678,28 @@ class ElevatorUpdateApp {
         }
     }
 
-    async updateStepStatus(stepId, status) {
+    updateStepStatus(stepId, status) {
         if (!this.isAdmin) {
             this.showToast('需要管理员权限', 'error');
             return;
         }
 
-        try {
-            if (!this.currentProject.steps) {
-                this.currentProject.steps = WORKFLOW_STEPS.map(s => ({ id: s.id, status: 'pending' }));
-            }
-
-            const step = this.currentProject.steps.find(s => s.id === stepId);
-            if (step) {
-                step.status = status;
-            } else {
-                this.currentProject.steps.push({ id: stepId, status });
-            }
-
-            this.currentProject.updatedAt = new Date().toISOString();
-            await this.db.saveProject(this.currentProject);
-            await this.loadProjects();
-            await this.renderProjectDetail();
-            this.showToast('状态已更新', 'success');
-        } catch (error) {
-            console.error('更新状态失败:', error);
-            this.showToast('更新状态失败', 'error');
+        if (!this.currentProject.steps) {
+            this.currentProject.steps = WORKFLOW_STEPS.map(s => ({ id: s.id, status: 'pending', photos: [] }));
         }
+
+        const step = this.currentProject.steps.find(s => s.id === stepId);
+        if (step) {
+            step.status = status;
+        } else {
+            this.currentProject.steps.push({ id: stepId, status, photos: [] });
+        }
+
+        this.currentProject.updatedAt = new Date().toISOString();
+        this.db.saveProject(this.currentProject);
+        this.loadProjects();
+        this.renderProjectDetail();
+        this.showToast('状态已更新（请记得同步到云端）', 'success');
     }
 
     openProjectModal(editProject = null) {
@@ -772,7 +727,7 @@ class ElevatorUpdateApp {
         this.editingProjectId = null;
     }
 
-    async saveProject() {
+    saveProject() {
         if (!this.isAdmin) {
             this.showToast('需要管理员权限', 'error');
             return;
@@ -791,51 +746,43 @@ class ElevatorUpdateApp {
             return;
         }
 
-        this.showLoading();
-        try {
-            let project;
-            if (this.editingProjectId) {
-                project = await this.db.getProject(this.editingProjectId);
-                project.name = name;
-                project.address = address;
-                project.coords = coords;
-                project.type = type;
-                project.elevatorCount = elevatorCount;
-                project.note = note;
-                project.updatedAt = new Date().toISOString();
-            } else {
-                project = {
-                    id: Date.now().toString(36) + Math.random().toString(36).substr(2),
-                    name,
-                    address,
-                    coords,
-                    type,
-                    elevatorCount,
-                    note,
-                    steps: WORKFLOW_STEPS.map(s => ({ id: s.id, status: 'pending' })),
-                    createdAt: new Date().toISOString(),
-                    updatedAt: new Date().toISOString()
-                };
-            }
-
-            await this.db.saveProject(project);
-            this.closeProjectModal();
-            await this.loadProjects();
-            
-            if (!this.editingProjectId) {
-                this.selectProject(project.id);
-            } else {
-                this.currentProject = project;
-                this.renderProjectDetail();
-            }
-            
-            this.showToast(this.editingProjectId ? '项目已更新' : '项目创建成功', 'success');
-        } catch (error) {
-            console.error('保存项目失败:', error);
-            this.showToast('保存项目失败', 'error');
-        } finally {
-            this.hideLoading();
+        let project;
+        if (this.editingProjectId) {
+            project = this.db.getProject(this.editingProjectId);
+            project.name = name;
+            project.address = address;
+            project.coords = coords;
+            project.type = type;
+            project.elevatorCount = elevatorCount;
+            project.note = note;
+            project.updatedAt = new Date().toISOString();
+        } else {
+            project = {
+                id: this.db.generateId(),
+                name,
+                address,
+                coords,
+                type,
+                elevatorCount,
+                note,
+                steps: WORKFLOW_STEPS.map(s => ({ id: s.id, status: 'pending', photos: [] })),
+                createdAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
         }
+
+        this.db.saveProject(project);
+        this.closeProjectModal();
+        this.loadProjects();
+        
+        if (!this.editingProjectId) {
+            this.selectProject(project.id);
+        } else {
+            this.currentProject = project;
+            this.renderProjectDetail();
+        }
+        
+        this.showToast(this.editingProjectId ? '项目已更新（请记得同步到云端）' : '项目创建成功（请记得同步到云端）', 'success');
     }
 
     editCurrentProject() {
@@ -852,23 +799,15 @@ class ElevatorUpdateApp {
 
         if (!this.currentProject) return;
 
-        this.showConfirm(`确定要删除项目"${this.currentProject.name}"吗？\n此操作将删除所有相关照片，且不可恢复！`, async () => {
-            this.showLoading();
-            try {
-                await this.db.deleteProject(this.currentProject.id);
-                this.currentProject = null;
-                
-                document.getElementById('welcomePage').style.display = 'flex';
-                document.getElementById('projectDetail').style.display = 'none';
-                
-                await this.loadProjects();
-                this.showToast('项目已删除', 'success');
-            } catch (error) {
-                console.error('删除项目失败:', error);
-                this.showToast('删除项目失败', 'error');
-            } finally {
-                this.hideLoading();
-            }
+        this.showConfirm(`确定要删除项目"${this.currentProject.name}"吗？\n此操作不可恢复！`, () => {
+            this.db.deleteProject(this.currentProject.id);
+            this.currentProject = null;
+            
+            document.getElementById('welcomePage').style.display = 'flex';
+            document.getElementById('projectDetail').style.display = 'none';
+            
+            this.loadProjects();
+            this.showToast('项目已删除（请记得同步到云端）', 'success');
         });
     }
 
@@ -876,33 +815,29 @@ class ElevatorUpdateApp {
     // 照片管理
     // ========================================
 
-    async openPhotoModal(stepId) {
+    openPhotoModal(stepId) {
         this.currentStep = stepId;
         const step = WORKFLOW_STEPS.find(s => s.id === stepId);
         document.getElementById('photoModalTitle').textContent = `${step.title} - ${this.isAdmin ? '照片管理' : '查看照片'}`;
         
-        await this.loadStepPhotos();
+        this.loadStepPhotos();
         document.getElementById('photoModal').classList.add('active');
     }
 
     closePhotoModal() {
         document.getElementById('photoModal').classList.remove('active');
-        document.getElementById('uploadProgress').style.display = 'none';
         this.currentStep = null;
+        document.getElementById('photoUrlInput').value = '';
         if (this.currentProject) {
             this.renderProjectDetail();
         }
     }
 
-    async loadStepPhotos() {
-        try {
-            const photos = await this.db.getPhotosByStep(this.currentProject.id, this.currentStep);
-            this.currentPhotos = photos;
-            this.renderPhotoGallery(photos);
-        } catch (error) {
-            console.error('加载照片失败:', error);
-            this.showToast('加载照片失败', 'error');
-        }
+    loadStepPhotos() {
+        const stepData = this.currentProject.steps?.find(s => s.id === this.currentStep);
+        const photos = stepData?.photos || [];
+        this.currentPhotos = photos;
+        this.renderPhotoGallery(photos);
     }
 
     renderPhotoGallery(photos) {
@@ -915,80 +850,65 @@ class ElevatorUpdateApp {
 
         container.innerHTML = photos.map((photo, index) => `
             <div class="gallery-item" onclick="app.openPreview(${index})">
-                <img src="${photo.url || photo.data}" alt="照片">
-                <div class="photo-upload-time">📅 ${this.formatDateTime(photo.uploadTime || photo.createdAt)}</div>
+                <img src="${photo.url}" alt="照片" onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22><rect fill=%22%23ddd%22 width=%22100%22 height=%22100%22/><text x=%2250%22 y=%2255%22 text-anchor=%22middle%22 fill=%22%23999%22 font-size=%2214%22>图片加载失败</text></svg>'">
+                <div class="photo-upload-time">📅 ${this.formatDateTime(photo.uploadTime)}</div>
                 ${this.isAdmin ? `<button class="delete-btn" onclick="event.stopPropagation(); app.deletePhotoById('${photo.id}')">&times;</button>` : ''}
             </div>
         `).join('');
     }
 
-    triggerPhotoUpload() {
-        if (!this.isAdmin) {
-            this.showToast('需要管理员权限', 'error');
-            return;
-        }
-        document.getElementById('photoInput').click();
-    }
-
-    async handlePhotoFiles(files) {
+    addPhotoFromUrl() {
         if (!this.isAdmin) {
             this.showToast('需要管理员权限', 'error');
             return;
         }
 
-        if (!files || files.length === 0) return;
-
-        const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-        const maxSize = 10 * 1024 * 1024;
-        let uploadCount = 0;
-        const totalFiles = files.length;
-
-        document.getElementById('uploadProgress').style.display = 'block';
-
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            
-            if (!validTypes.includes(file.type)) {
-                this.showToast(`不支持的文件格式: ${file.name}`, 'error');
-                continue;
-            }
-
-            if (file.size > maxSize) {
-                this.showToast(`文件过大: ${file.name}（最大10MB）`, 'error');
-                continue;
-            }
-
-            try {
-                document.getElementById('uploadProgressText').textContent = 
-                    `正在上传 ${i + 1}/${totalFiles}: ${file.name}`;
-
-                await this.db.uploadPhoto(
-                    file, 
-                    this.currentProject.id, 
-                    this.currentStep,
-                    (progress) => {
-                        document.getElementById('uploadProgressFill').style.width = `${progress}%`;
-                    }
-                );
-                uploadCount++;
-            } catch (error) {
-                console.error('上传照片失败:', error);
-                this.showToast(`上传失败: ${file.name}`, 'error');
-            }
+        const url = document.getElementById('photoUrlInput').value.trim();
+        if (!url) {
+            this.showToast('请输入图片链接', 'error');
+            return;
         }
 
-        document.getElementById('uploadProgress').style.display = 'none';
-        document.getElementById('uploadProgressFill').style.width = '0%';
-
-        if (uploadCount > 0) {
-            this.showToast(`成功上传 ${uploadCount} 张照片`, 'success');
-            await this.loadStepPhotos();
+        if (!url.startsWith('http')) {
+            this.showToast('请输入有效的图片链接', 'error');
+            return;
         }
+
+        // 找到当前步骤
+        if (!this.currentProject.steps) {
+            this.currentProject.steps = WORKFLOW_STEPS.map(s => ({ id: s.id, status: 'pending', photos: [] }));
+        }
+
+        let stepData = this.currentProject.steps.find(s => s.id === this.currentStep);
+        if (!stepData) {
+            stepData = { id: this.currentStep, status: 'pending', photos: [] };
+            this.currentProject.steps.push(stepData);
+        }
+
+        if (!stepData.photos) {
+            stepData.photos = [];
+        }
+
+        // 添加照片
+        const photo = {
+            id: this.db.generateId(),
+            url: url,
+            uploadTime: new Date().toISOString()
+        };
+        stepData.photos.push(photo);
+
+        this.currentProject.updatedAt = new Date().toISOString();
+        this.db.saveProject(this.currentProject);
+        
+        document.getElementById('photoUrlInput').value = '';
+        this.loadStepPhotos();
+        this.showToast('照片已添加（请记得同步到云端）', 'success');
     }
 
-    async openPreviewFromStep(photoId, stepId) {
+    openPreviewFromStep(photoId, stepId) {
         this.currentStep = stepId;
-        const photos = await this.db.getPhotosByStep(this.currentProject.id, stepId);
+        const stepData = this.currentProject.steps?.find(s => s.id === stepId);
+        const photos = stepData?.photos || [];
         this.currentPhotos = photos;
         const index = photos.findIndex(p => p.id === photoId);
         if (index >= 0) {
@@ -1009,9 +929,9 @@ class ElevatorUpdateApp {
     updatePreviewImage() {
         const photo = this.currentPhotos[this.currentPhotoIndex];
         if (photo) {
-            document.getElementById('previewImage').src = photo.url || photo.data;
+            document.getElementById('previewImage').src = photo.url;
             document.getElementById('previewInfo').textContent = 
-                `${this.currentPhotoIndex + 1} / ${this.currentPhotos.length} - 上传于 ${this.formatDateTime(photo.uploadTime || photo.createdAt)}`;
+                `${this.currentPhotoIndex + 1} / ${this.currentPhotos.length} - 上传于 ${this.formatDateTime(photo.uploadTime)}`;
         }
     }
 
@@ -1036,18 +956,21 @@ class ElevatorUpdateApp {
         }
     }
 
-    async deletePhotoById(id) {
+    deletePhotoById(id) {
         if (!this.isAdmin) {
             this.showToast('需要管理员权限', 'error');
             return;
         }
 
-        this.showConfirm('确定要删除这张照片吗？', async () => {
-            try {
-                await this.db.deletePhoto(id);
-                this.showToast('照片已删除', 'success');
+        this.showConfirm('确定要删除这张照片吗？', () => {
+            const stepData = this.currentProject.steps?.find(s => s.id === this.currentStep);
+            if (stepData && stepData.photos) {
+                stepData.photos = stepData.photos.filter(p => p.id !== id);
+                this.currentProject.updatedAt = new Date().toISOString();
+                this.db.saveProject(this.currentProject);
+                this.showToast('照片已删除（请记得同步到云端）', 'success');
                 
-                await this.loadStepPhotos();
+                this.loadStepPhotos();
                 
                 if (document.getElementById('previewModal').classList.contains('active')) {
                     if (this.currentPhotos.length === 0) {
@@ -1059,9 +982,6 @@ class ElevatorUpdateApp {
                         this.updatePreviewImage();
                     }
                 }
-            } catch (error) {
-                console.error('删除照片失败:', error);
-                this.showToast('删除照片失败', 'error');
             }
         });
     }
