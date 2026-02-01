@@ -287,6 +287,49 @@ body {
     border-radius: 20px;
 }
 
+/* 管理员状态 */
+.admin-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 20px;
+    font-size: 12px;
+}
+
+.admin-icon {
+    font-size: 14px;
+}
+
+.btn-admin {
+    padding: 6px 14px;
+    background: rgba(255, 255, 255, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 20px;
+    color: var(--white);
+    font-size: 12px;
+    cursor: pointer;
+    transition: var(--transition-fast);
+}
+
+.btn-admin:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+
+/* 管理员槽位 */
+.admin-slots p {
+    margin-bottom: 16px;
+    color: var(--gray-600);
+}
+
+/* 访客提示 */
+.visitor-hint {
+    margin-top: 24px;
+    color: var(--gray-500);
+    font-size: 14px;
+}
+
 /* ========================================
    主内容区域
    ======================================== */
@@ -703,10 +746,61 @@ body {
 
 .step-card.completed {
     border-left: 4px solid var(--success-color);
+    background: linear-gradient(135deg, rgba(52, 168, 83, 0.05) 0%, rgba(255, 255, 255, 0.95) 100%);
 }
 
 .step-card.in-progress {
     border-left: 4px solid var(--primary-color);
+}
+
+/* 项目完成状态 */
+.project-item.completed {
+    background: linear-gradient(135deg, var(--success-light) 0%, var(--white) 100%);
+}
+
+.project-item.completed .project-item-icon {
+    background: var(--success-color);
+    color: var(--white);
+}
+
+.progress-bar.completed .progress-fill,
+.progress-fill.completed {
+    background: linear-gradient(90deg, var(--success-color) 0%, #2e7d32 100%);
+}
+
+.progress-text.completed {
+    color: var(--success-color);
+    font-weight: 600;
+}
+
+.progress-overview.completed {
+    background: linear-gradient(135deg, rgba(52, 168, 83, 0.1) 0%, rgba(255, 255, 255, 0.95) 100%);
+    border: 1px solid rgba(52, 168, 83, 0.3);
+}
+
+.project-badge.completed {
+    background: var(--success-color);
+    color: var(--white);
+}
+
+/* 步骤状态文本 */
+.step-status-text {
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--gray-100);
+    color: var(--gray-600);
+}
+
+.step-status-text.completed {
+    background: var(--success-light);
+    color: var(--success-color);
+}
+
+.step-status-text.in-progress {
+    background: var(--primary-light);
+    color: var(--primary-color);
 }
 
 .step-header {
@@ -820,6 +914,66 @@ body {
     border-color: var(--primary-color);
     transform: scale(1.05);
     box-shadow: var(--shadow-md);
+}
+
+/* 照片缩略图容器 */
+.photo-thumb-container {
+    position: relative;
+    display: inline-block;
+}
+
+.photo-thumb-container .photo-time {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(0, 0, 0, 0.7);
+    color: var(--white);
+    font-size: 10px;
+    padding: 2px 4px;
+    text-align: center;
+    border-radius: 0 0 6px 6px;
+}
+
+/* 照片上传时间 */
+.photo-upload-time {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: linear-gradient(transparent, rgba(0,0,0,0.8));
+    color: var(--white);
+    font-size: 11px;
+    padding: 20px 8px 6px;
+    text-align: center;
+}
+
+/* 地图容器 */
+.map-container {
+    margin-bottom: 24px;
+    padding: 20px;
+    background: rgba(255, 255, 255, 0.95);
+    backdrop-filter: blur(20px);
+    border-radius: var(--border-radius-xl);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid rgba(26, 115, 232, 0.1);
+}
+
+.map-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+}
+
+.map-header h3 {
+    font-size: 16px;
+    color: var(--gray-800);
+}
+
+#mapView {
+    border-radius: var(--border-radius);
+    overflow: hidden;
 }
 
 .btn-upload-photo {
